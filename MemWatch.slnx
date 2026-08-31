@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="MemWatch/MemWatch.vcxproj" Id="fba61ea9-ad32-497d-a0ee-7d53525e316c" />
+</Solution>
