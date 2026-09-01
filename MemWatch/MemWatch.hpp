@@ -4,6 +4,7 @@
 #include <vector>
 #include <assert.h>
 #include <algorithm>
+#include <stdexcept>
 
 #include <Windows.h>
 #include <TlHelp32.h>
@@ -39,16 +40,18 @@ class ProcHeapScanner {
 	bool hcheck = false;
 	bool hlcheck = false;
 
-	void QueryAndRead();
+	int QueryAndRead();
 public:
 	ProcHeapScanner(DWORD pid);
 	~ProcHeapScanner();
 
+	int FirstChunk();
+
 	int NextChunk();
 
-	void NextHeap();
+	int NextHeap();
 
-	void NextBlock();
+	int NextBlock();
 
 	std::vector<std::byte> GetData();
 

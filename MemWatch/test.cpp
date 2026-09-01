@@ -15,6 +15,8 @@ void classy(DWORD pid) {
 	int result = 0;
 	ProcHeapScanner scanner(pid);
 
+	scanner.FirstChunk();
+
 	while (!result) {
 		result = scanner.NextChunk();
 
@@ -42,9 +44,9 @@ int main() {
 
 	DWORD pid = pentry.th32ProcessID;
 
-	//func(pid);
+	func(pid);
 
-	classy(pid);
+	//classy(pid);
 
 	
 }

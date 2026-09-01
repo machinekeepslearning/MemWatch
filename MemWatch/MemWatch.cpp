@@ -44,6 +44,7 @@ int getmem(HANDLE hProcess, HANDLE hHeapList, std::string str_to_find) {
 			std::cout << "Read Failed" << std::endl;
 		}
 
+		
 		std::cout << "Block Size: " << hentry.dwBlockSize << " ";
 		std::cout << "Data Size: " << tmpbuff.size() << std::endl;
 		while (hcheck) {
@@ -75,7 +76,7 @@ int getmem(HANDLE hProcess, HANDLE hHeapList, std::string str_to_find) {
 				if (!ReadProcessMemory(hProcess, reinterpret_cast<void*>(current_addy), tmpbuff.data(), bytes_to_read, &bytes_read)) {
 					std::cout << "Read Failed" << std::endl;
 				}
-				std::cout << "Block Size: " << hentry.dwBlockSize << " ";
+				std::cout << "Current Addy: " << (void*)current_addy << " Block Size: " << hentry.dwBlockSize << " ";
 				std::cout << "Data Size: " << tmpbuff.size() << std::endl;
 
 				ccounter++;
@@ -94,34 +95,16 @@ int getmem(HANDLE hProcess, HANDLE hHeapList, std::string str_to_find) {
 		std::cout << "Blocks in that heap: " << bcounter << std::endl;
 		std::cout << "Chunks in that heap: " << ccounter << std::endl;
 		hlcheck = Heap32ListNext(hHeapList, &hlentry);
-		hcounter++;
+		if (hlcheck)
+			hcounter++;
 	}
 	return found;
 }
 
 ProcHeapScanner::ProcHeapScanner(DWORD pid) {
 	this->pid = pid;
-	hProcess = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, false, pid);
-	hHeapList = CreateToolhelp32Snapshot(TH32CS_SNAPHEAPLIST, pid);
-
-	hlentry.dwSize = sizeof(HEAPLIST32);
-	hentry.dwSize = sizeof(HEAPENTRY32);
-
-	hlcheck = Heap32ListFirst(hHeapList, &hlentry);
-
-	if (!hlcheck) return;
-
-	hcheck = Heap32First(&hentry, hlentry.th32ProcessID, hlentry.th32HeapID);
-
-	if (!hcheck) return;
-
-	current_addy = hentry.dwAddress;
-
-	QueryAndRead();
-
-	heapcounter++;
-	blockcounter++;
-	chunkcounter++;
+	hProcess = NULL;
+	hHeapList = INVALID_HANDLE_VALUE;
 }
 
 ProcHeapScanner::~ProcHeapScanner() {
@@ -129,11 +112,11 @@ ProcHeapScanner::~ProcHeapScanner() {
 	CloseHandle(hProcess);
 }
 
-void ProcHeapScanner::QueryAndRead() {
+int ProcHeapScanner::QueryAndRead() {
 	int qrd = VirtualQueryEx(hProcess, reinterpret_cast<void*>(current_addy), &mbi, sizeof(MEMORY_BASIC_INFORMATION));
 	if (qrd == 0) {
 		std::cerr << "FAILED TO QUERY, CHECK PROCESS PERMISSIONS" << std::endl;
-		return;
+		return -1;
 	}
 
 	ULONG_PTR region_end = reinterpret_cast<ULONG_PTR>(mbi.BaseAddress) + mbi.RegionSize;
@@ -144,7 +127,7 @@ void ProcHeapScanner::QueryAndRead() {
 		total_read += bytes_to_read;
 		current_addy += bytes_to_read;
 		std::cout << "NO ACCESS" << std::endl;
-		return;
+		return -1;
 	}
 
 	if (bytes_to_read > data.size()) data.resize(bytes_to_read);
@@ -162,20 +145,48 @@ void ProcHeapScanner::QueryAndRead() {
 
 		std::cout << "Total read " << total_read << std::endl;
 		std::cout << "Block size: " << hentry.dwBlockSize << std::endl;
-		exit(-1);
+		return -1;
 	}
 
-	std::cout << "Address: " << LPVOID(current_addy) << std::endl;
-	std::cout << "bytes read: " << bytes_read << std::endl;
-	std::cout << "Block Size: " << hentry.dwBlockSize << " ";
+	std::cout << "Address: " << LPVOID(current_addy);
+	std::cout << " Block Size: " << hentry.dwBlockSize << " ";
 	std::cout << "Data Size: " << data.size() << std::endl;
 	total_read += bytes_read;
 	current_addy += bytes_read;
+
+	chunkcounter++;
+
+	return 0;
+}
+
+int ProcHeapScanner::FirstChunk() {
+	hProcess = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, false, pid);
+	hHeapList = CreateToolhelp32Snapshot(TH32CS_SNAPHEAPLIST, pid);
+
+	if (hProcess == NULL) return -1;
+	if (hHeapList == INVALID_HANDLE_VALUE) return -1;
+
+	hlentry.dwSize = sizeof(HEAPLIST32);
+	hentry.dwSize = sizeof(HEAPENTRY32);
+
+	hlcheck = Heap32ListFirst(hHeapList, &hlentry);
+
+	if (!hlcheck) return -1;
+
+	hcheck = Heap32First(&hentry, hlentry.th32ProcessID, hlentry.th32HeapID);
+
+	if (!hcheck) return -1;
+
+	current_addy = hentry.dwAddress;
+
+	heapcounter++;
+	blockcounter++;
+
+	return QueryAndRead();
 }
 
 int ProcHeapScanner::NextChunk() {
 	if (total_read >= hentry.dwBlockSize) {
-		std::cout << "GOING TO NEXT BLOCK" << std::endl;
 		hcheck = Heap32Next(&hentry);
 		if (hcheck) blockcounter++;
 		total_read = 0;
@@ -187,42 +198,46 @@ int ProcHeapScanner::NextChunk() {
 	if (!hcheck) {
 		//std::cout << "GOING TO NEXT HEAP" << std::endl;
 		hlcheck = Heap32ListNext(hHeapList, &hlentry);
-		if (hlcheck) heapcounter++;
+		if (hlcheck) {
+			std::cout << "New Heap" << std::endl;
+			heapcounter++;
+			hcheck = Heap32First(&hentry, pid, hlentry.th32HeapID);
+			if (hcheck) {
+				blockcounter++;
+			}
+			else {
+				return -1;
+			}
+		}
+		else {
+			return -1;
+		}
 	}
 
-	if (!hlcheck) {
-		std::cout << "CHECK: " << hlcheck << std::endl;
-		return -1;
-	}
-
-	QueryAndRead();
-
-	chunkcounter++;
-
-	return 0;
+	return QueryAndRead();
 }
 
-void ProcHeapScanner::NextHeap() {
+int ProcHeapScanner::NextHeap() {
 
 	hlcheck = Heap32ListNext(hHeapList, &hlentry);
 	hcheck = Heap32First(&hentry, hlentry.th32ProcessID, hlentry.th32HeapID);
 
-	if (!hlcheck) return;
+	if (!hlcheck) return -1;
 
 	current_addy = hentry.dwAddress;
 
-	QueryAndRead();
+	return QueryAndRead();
 }
 
-void ProcHeapScanner::NextBlock() {
+int ProcHeapScanner::NextBlock() {
 
 	hcheck = Heap32Next(&hentry);
 
-	if (!hcheck) return;
+	if (!hcheck) return -1;
 
 	current_addy = hentry.dwAddress;
 
-	QueryAndRead();
+	return QueryAndRead();
 }
 
 std::vector<std::byte> ProcHeapScanner::GetData() {
